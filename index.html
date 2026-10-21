@@ -126,6 +126,31 @@ body[data-view="run"] #run { display: flex; }
 .cnt.c b { color: #ffc400; }
 .play { width: 140px; height: 118px; background: var(--go); display: grid; place-items: center; color: #111; }
 .play svg { width: 54px; height: 54px; fill: currentColor; }
+#voiceSel { width: 100%; height: 50px; border-radius: 10px; border: 2px solid var(--line); background: var(--card2); color: var(--fg); padding: 0 10px; font: inherit; }
+
+/* telefono in orizzontale: a sinistra fase e tempo, a destra totale, prossima fase e comandi */
+@media (orientation: landscape) and (max-height: 560px) {
+  #run { display: none; }
+  body[data-view="run"] #run {
+    display: grid; grid-template-columns: 1fr minmax(210px, 34%); grid-template-rows: auto 1fr auto;
+    grid-template-areas: "links rtop" "mid nextb" "seeiv rbot";
+  }
+  .rtop { grid-area: rtop; padding-top: env(safe-area-inset-top, 0px); }
+  .rtop .x { width: 60px; font-size: 2rem; }
+  .rtop .tt { font-size: 2.4rem; }
+  .rtop .nm { font-size: 1.2rem; }
+  .rlinks { grid-area: links; padding-top: max(8px, env(safe-area-inset-top, 0px)); }
+  .mid { grid-area: mid; }
+  .pname { font-size: min(18vh, 12vw); }
+  .clock { font-size: min(52vh, 26vw); }
+  .seeiv { grid-area: seeiv; margin-bottom: 4px; min-height: 44px; }
+  .nextb { grid-area: nextb; display: flex; flex-direction: column; justify-content: center; border-top: 0; border-left: 4px solid #000; padding: 6px 0; }
+  .nextb b { font-size: 2.4rem; }
+  .rbot { grid-area: rbot; grid-template-columns: 1fr 1fr; padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+  .cnt b { font-size: 3.2rem; }
+  .play { grid-column: 1 / -1; grid-row: 2; width: 100%; height: 64px; }
+  .play svg { width: 36px; height: 36px; }
+}
 </style>
 </head>
 <body data-view="home">
@@ -193,11 +218,15 @@ body[data-view="run"] #run { display: flex; }
 <!-- finestra suoni -->
 <div class="sheet-bg" id="soBg"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="soT">
   <h2 id="soT">Suoni</h2>
-  <button class="tog" type="button" data-s="gong" aria-pressed="true">Gong a fine round <i></i></button>
-  <button class="tog" type="button" data-s="count" aria-pressed="true">Bip negli ultimi 3 secondi <i></i></button>
-  <button class="tog" type="button" data-s="change" aria-pressed="true">Suono a ogni cambio di fase <i></i></button>
+  <button class="tog" type="button" data-s="gong" aria-pressed="true">Gong a ogni cambio <i></i></button>
+  <button class="tog" type="button" data-s="voice" aria-pressed="true">Voce (Riposo e conto alla rovescia) <i></i></button>
   <button class="tog" type="button" data-s="vib" aria-pressed="true">Vibrazione <i></i></button>
-  <button class="tog" type="button" id="soTest" style="justify-content:center">Prova il gong</button>
+  <label class="fieldlab" for="voiceSel" style="margin:4px 0 0 2px">Voce</label>
+  <select id="voiceSel"><option value="">Automatica (italiana)</option></select>
+  <div class="btns two">
+    <button type="button" id="soTest">Prova il gong</button>
+    <button type="button" id="soVoice">Prova la voce</button>
+  </div>
   <button class="done" id="soOk" type="button">Fatto</button>
 </div></div>
 
@@ -205,7 +234,7 @@ body[data-view="run"] #run { display: flex; }
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var KEY = 'timerAllenamento.v2';
-  var state = { workouts: [], sound: { gong: true, count: true, change: true, vib: true } };
+  var state = { workouts: [], voice: '', sound: { gong: true, voice: true, vib: true } };
 
   var DEFAULTS = [
     { id: 'd1', name: 'Tabata', prep: 15, work: 20, rest: 10, rounds: 8, cycles: 1, cycrest: 60, cool: 0 },
@@ -214,7 +243,7 @@ body[data-view="run"] #run { display: flex; }
   function load() {
     try {
       var d = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (d && Array.isArray(d.workouts)) { state.workouts = d.workouts; if (d.sound) Object.assign(state.sound, d.sound); return; }
+      if (d && Array.isArray(d.workouts)) { state.workouts = d.workouts; if (d.sound) Object.assign(state.sound, d.sound); if (d.voice) state.voice = d.voice; return; }
     } catch (e) {}
     state.workouts = JSON.parse(JSON.stringify(DEFAULTS));
   }
@@ -352,21 +381,13 @@ body[data-view="run"] #run { display: flex; }
     } catch (e) {}
     return ac;
   }
-  function beep(freq, ms, vol) {
+  /* campana da ring: n colpi ravvicinati (3 a fine round, 1 agli altri cambi), con armoniche metalliche che si spengono piano */
+  function gong(n) {
     var a = ctx(); if (!a) return;
-    var o = a.createOscillator(), g = a.createGain(), t = a.currentTime;
-    o.type = 'sine'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol || 0.5, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
-    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + ms / 1000 + 0.05);
-  }
-  /* campana da ring: tre colpi ravvicinati, ognuno con armoniche metalliche che si spengono piano */
-  function gong() {
-    var a = ctx(); if (!a) return;
+    n = n || 1;
     var base = 560, partials = [[1, 1], [2.01, 0.55], [2.76, 0.5], [4.07, 0.3], [5.4, 0.22], [6.9, 0.12]];
-    [0, 0.3, 0.6].forEach(function (off, h) {
-      var t0 = a.currentTime + off, life = h === 2 ? 2.6 : 1.1;
+    [0, 0.3, 0.6].slice(0, n).forEach(function (off, h) {
+      var t0 = a.currentTime + off, life = h === n - 1 ? (n === 1 ? 2.2 : 2.6) : 1.1;
       partials.forEach(function (p) {
         var o = a.createOscillator(), g = a.createGain();
         o.type = 'sine'; o.frequency.value = base * p[0];
@@ -376,6 +397,36 @@ body[data-view="run"] #run { display: flex; }
         o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + life + 0.1);
       });
     });
+  }
+  /* voce italiana (sintesi vocale del telefono) */
+  var voices = [], hasTTS = 'speechSynthesis' in window;
+  function fillVoiceSelect() {
+    var sel = $('voiceSel'); if (!sel) return;
+    sel.innerHTML = '<option value="">Automatica (italiana)</option>';
+    voices.forEach(function (v) { var o = document.createElement('option'); o.value = v.name; o.textContent = v.name; sel.appendChild(o); });
+    sel.value = state.voice || '';
+  }
+  function loadVoices() {
+    try { voices = speechSynthesis.getVoices().filter(function (v) { return /^it/i.test(v.lang); }); } catch (e) { voices = []; }
+    fillVoiceSelect();
+  }
+  if (hasTTS) { loadVoices(); try { speechSynthesis.onvoiceschanged = loadVoices; } catch (e) {} }
+  function pickVoice() {
+    if (state.voice) { var f = voices.filter(function (v) { return v.name === state.voice; })[0]; if (f) return f; }
+    var fem = voices.filter(function (v) { return /elsa|alice|federica|paola|isabella|lucia|female|donna/i.test(v.name); })[0];
+    return fem || voices[0] || null;
+  }
+  function speak(txt, delay) {
+    if (!state.sound.voice || !hasTTS) return;
+    var go = function () {
+      try {
+        var u = new SpeechSynthesisUtterance(txt); u.lang = 'it-IT';
+        var v = pickVoice(); if (v) u.voice = v;
+        u.rate = 1.05; u.pitch = 1.15; u.volume = 1;
+        speechSynthesis.cancel(); speechSynthesis.speak(u);
+      } catch (e) {}
+    };
+    if (delay) setTimeout(go, delay); else go();
   }
   function vib(ms) { if (state.sound.vib) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} } }
 
@@ -395,16 +446,16 @@ body[data-view="run"] #run { display: flex; }
     ctx(); wake(); showView('run');
     $('rName').textContent = w.name;
     startPhase(0, true);
+    if (phases[0].t === 'work' && state.sound.gong) gong(1);
     clearInterval(tick); tick = setInterval(draw, 100);
   }
   function startPhase(i, silent) {
-    var prev = phases[idx];
     idx = i; lastBeep = null;
     var p = phases[idx];
     endAt = Date.now() + p.dur * 1000;
-    if (!silent && state.sound.change && !(prev && prev.gong && state.sound.gong)) {
-      beep(p.t === 'work' ? 1000 : 640, p.t === 'work' ? 450 : 260); vib(150);
-    }
+    if (p.t === 'prep') speak('Preparati');
+    else if (p.t === 'rest' || p.t === 'cyc') speak('Riposo', 700);
+    if (!silent) vib(150);
     var ty = T[p.t], nx = phases[idx + 1];
     var run = $('run');
     run.style.setProperty('--pbg', ty.bg); run.style.setProperty('--pfg', ty.fg);
@@ -425,12 +476,12 @@ body[data-view="run"] #run { display: flex; }
     $('rClock').textContent = fmt(secs);
     var rest = 0; for (var j = idx + 1; j < phases.length; j++) rest += phases[j].dur;
     $('rTot').textContent = fmtShort(Math.ceil(l / 1000) + rest);
-    if (!paused && state.sound.count && secs <= 3 && secs > 0 && secs !== lastBeep) { lastBeep = secs; beep(800, 110, 0.4); }
+    if (!paused && phases[idx].dur > 4 && secs <= 3 && secs > 0 && secs !== lastBeep) { lastBeep = secs; speak(['', 'uno', 'due', 'tre'][secs]); }
     if (!paused && l <= 0) advance();
   }
   function advance() {
     var p = phases[idx];
-    if (p.gong && state.sound.gong) gong();
+    if (state.sound.gong) gong(p.gong ? 3 : 1);
     if (idx + 1 < phases.length) startPhase(idx + 1); else finish(p);
   }
   function finish(p) {
@@ -440,11 +491,11 @@ body[data-view="run"] #run { display: flex; }
     $('rPhase').textContent = 'Fatto!'; $('rClock').textContent = '00:00'; $('rTot').textContent = '0:00';
     $('rNextN').textContent = '—'; $('rRounds').textContent = '0'; $('rCycles').textContent = '0';
     $('rPlay').innerHTML = PLAY;
-    if (!(p.gong && state.sound.gong)) { beep(1200, 700); }
     vib(400); unwake();
   }
   function quit() {
     clearInterval(tick); tick = null; mode = 'off'; paused = false; unwake();
+    try { if (hasTTS) speechSynthesis.cancel(); } catch (e) {}
     $('ivBg').classList.remove('open'); $('soBg').classList.remove('open');
     showView('home');
   }
@@ -481,8 +532,10 @@ body[data-view="run"] #run { display: flex; }
   document.querySelectorAll('.tog[data-s]').forEach(function (b) {
     b.onclick = function () { var k = b.getAttribute('data-s'); state.sound[k] = !state.sound[k]; save(); syncSound(); };
   });
-  $('soTest').onclick = function () { gong(); };
-  $('rSound').onclick = function () { syncSound(); $('soBg').classList.add('open'); };
+  $('soTest').onclick = function () { gong(3); };
+  $('soVoice').onclick = function () { speak('Riposo'); };
+  $('voiceSel').onchange = function () { state.voice = this.value; save(); speak('Riposo'); };
+  $('rSound').onclick = function () { syncSound(); fillVoiceSelect(); $('soBg').classList.add('open'); };
   $('soOk').onclick = function () { $('soBg').classList.remove('open'); };
   $('soBg').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
 
