@@ -157,7 +157,7 @@ body[data-view="run"] #run { display: flex; }
 
 <!-- ELENCO -->
 <section class="view col" id="home">
-  <div class="bar pad"><h1>Allenamenti</h1></div>
+  <div class="bar pad"><h1>Allenamenti</h1><button class="sec" id="hSound" type="button" style="width:auto;height:44px;padding:0 14px">Suoni</button></div>
   <div class="list pad" id="list"></div>
 </section>
 
@@ -221,6 +221,8 @@ body[data-view="run"] #run { display: flex; }
   <button class="tog" type="button" data-s="gong" aria-pressed="true">Gong a ogni cambio <i></i></button>
   <button class="tog" type="button" data-s="voice" aria-pressed="true">Voce (Riposo e conto alla rovescia) <i></i></button>
   <button class="tog" type="button" data-s="vib" aria-pressed="true">Vibrazione <i></i></button>
+  <label class="fieldlab" for="volRange" style="margin:4px 0 0 2px">Volume del gong</label>
+  <input type="range" id="volRange" min="0.3" max="1.5" step="0.1" value="1" style="width:100%;height:36px;accent-color:var(--go)">
   <label class="fieldlab" for="voiceSel" style="margin:4px 0 0 2px">Voce</label>
   <select id="voiceSel"><option value="">Automatica (italiana)</option></select>
   <div class="btns two">
@@ -243,7 +245,7 @@ body[data-view="run"] #run { display: flex; }
   function load() {
     try {
       var d = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (d && Array.isArray(d.workouts)) { state.workouts = d.workouts; if (d.sound) Object.assign(state.sound, d.sound); if (d.voice) state.voice = d.voice; return; }
+      if (d && Array.isArray(d.workouts)) { state.workouts = d.workouts; if (d.sound) Object.assign(state.sound, d.sound); if (d.voice) state.voice = d.voice; if (d.vol != null) state.vol = d.vol; return; }
     } catch (e) {}
     state.workouts = JSON.parse(JSON.stringify(DEFAULTS));
   }
@@ -385,16 +387,20 @@ body[data-view="run"] #run { display: flex; }
   function gong(n) {
     var a = ctx(); if (!a) return;
     n = n || 1;
-    var base = 560, partials = [[1, 1], [2.01, 0.55], [2.76, 0.5], [4.07, 0.3], [5.4, 0.22], [6.9, 0.12]];
+    var base = 700, partials = [[1, 1], [2.01, 0.6], [2.76, 0.55], [4.07, 0.35], [5.4, 0.25], [6.9, 0.15]];
+    /* volume generale con compressore: il suono è forte ma non distorce */
+    var master = a.createGain(); master.gain.value = 2.2 * (state.vol == null ? 1 : state.vol);
+    var comp = a.createDynamicsCompressor();
+    master.connect(comp); comp.connect(a.destination);
     [0, 0.3, 0.6].slice(0, n).forEach(function (off, h) {
       var t0 = a.currentTime + off, life = h === n - 1 ? (n === 1 ? 2.2 : 2.6) : 1.1;
       partials.forEach(function (p) {
         var o = a.createOscillator(), g = a.createGain();
         o.type = 'sine'; o.frequency.value = base * p[0];
         g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.32 * p[1], t0 + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.4 * p[1], t0 + 0.005);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + life / Math.max(1, p[0] * 0.6));
-        o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + life + 0.1);
+        o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + life + 0.1);
       });
     });
   }
@@ -423,7 +429,9 @@ body[data-view="run"] #run { display: flex; }
         var u = new SpeechSynthesisUtterance(txt); u.lang = 'it-IT';
         var v = pickVoice(); if (v) u.voice = v;
         u.rate = 1.05; u.pitch = 1.15; u.volume = 1;
-        speechSynthesis.cancel(); speechSynthesis.speak(u);
+        /* su Android, cancel() subito prima di speak() fa perdere la frase: si ferma solo se sta parlando */
+        if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(function () { speechSynthesis.speak(u); }, 80); }
+        else { speechSynthesis.speak(u); }
       } catch (e) {}
     };
     if (delay) setTimeout(go, delay); else go();
@@ -533,9 +541,12 @@ body[data-view="run"] #run { display: flex; }
     b.onclick = function () { var k = b.getAttribute('data-s'); state.sound[k] = !state.sound[k]; save(); syncSound(); };
   });
   $('soTest').onclick = function () { gong(3); };
+  $('volRange').oninput = function () { state.vol = parseFloat(this.value); save(); };
+  $('volRange').onchange = function () { gong(1); };
+  $('hSound').onclick = function () { ctx(); syncSound(); fillVoiceSelect(); $('volRange').value = state.vol == null ? 1 : state.vol; $('soBg').classList.add('open'); };
   $('soVoice').onclick = function () { speak('Riposo'); };
   $('voiceSel').onchange = function () { state.voice = this.value; save(); speak('Riposo'); };
-  $('rSound').onclick = function () { syncSound(); fillVoiceSelect(); $('soBg').classList.add('open'); };
+  $('rSound').onclick = function () { syncSound(); fillVoiceSelect(); $('volRange').value = state.vol == null ? 1 : state.vol; $('soBg').classList.add('open'); };
   $('soOk').onclick = function () { $('soBg').classList.remove('open'); };
   $('soBg').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
 
